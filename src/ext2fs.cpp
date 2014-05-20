@@ -283,9 +283,59 @@ struct Ext2FSInode * Ext2FS::load_inode(unsigned int inode_number)
 	//COMPLETAR
 }
 
+/*
+Reading the contents of an inode
+
+	Each inode contains 12 direct pointers, one singly indirect pointer, one doubly indirect block pointer, and one triply indirect pointer. The direct space "overflows" into the singly indirect space, which overflows into the doubly indirect space, which overflows into the triply indirect space.
+
+	Direct Block Pointers: There are 12 direct block pointers. If valid, the value is non-zero. Each pointer is the block address of a block containing data for this inode.
+
+	Singly Indirect Block Pointer: If a file needs more than 12 blocks, a separate block is allocated to store the block addresses of the remaining data blocks needed to store its contents. This separate block is called an indirect block because it adds an extra step (a level of indirection) between an inode and its data. The block addresses stored in the block are all 32-bit, and the capacity of stored addresses in this block is a function of the block size. The address of this indirect block is stored in the inode in the "Singly Indirect Block Pointer" field.
+
+	Doubly Indirect Block Pointer: If a file has more blocks than can fit in the 12 direct pointers and the indirect block, a double indirect block is used. A double indirect block is an extension of the indirect block described above only now we have two intermediate blocks between the inode and data blocks. The inode structure has a "Doubly Indirect Block Pointer" field that points to this block if necessary.
+
+	Triply Indirect Block Pointer: Lastly, if a file needs still more space, it can use a triple indirect block. Again, this is an extension of the double indirect block. So, a triple indirect block contains addresses of double indirect blocks, which contain addresses of single indirect blocks, which contain address of data blocks. The inode structure has a "Triply Indirect Block Pointer" field that points to this block if present.
+
+	This image from Wikipedia illustrates what is described above pretty well
+
+*/
 unsigned int Ext2FS::get_block_address(struct Ext2FSInode * inode, unsigned int block_number)
 {
-	//COMPLETAR
+	//Asumo que lo que se quiere es obtener la direccion del bloque i-esimo(block_number) adentro del inodo
+
+	//si block_number esta en [0..11] entonces son punteros directos
+	//Sea f(x) un valor que depende del tamaño x del bloque en el filesystem
+	//si block_number esta en [12..f(x)] entonces el hay que obtener el (block_number - 12) bloque indireccionando
+	//una vez mas.
+	//asi siguiendo en cascada sobre las dobles y triples indirecciones.
+
+	//validaciones
+	assert(block_number >= 0);
+
+
+
+									assert(block_number < 12);
+
+
+
+	//definicion de variables
+	unsigned int gatheredAddress = 0;
+	//dummy values
+	unsigned int first_indirection_limit = 256;
+	unsigned int second_indirection_limit = 1024;
+	unsigned int third_indirection_limit = 4096;
+
+	//decision acerca de como obtener la direccion del bloque.
+	if(block_number < 12){
+		gatheredAddress = inode->blocks[block_number];
+	}else if(block_number < first_indirection_limit){
+		//obtener el bloque de punteros a mas bloques
+	}else if(block_number < second_indirection_limit){	
+		//obtener el bloque de punteros a mas bloques
+	}else if(block_number < third_indirection_limit){
+		//obtener el bloque de punteros a mas bloques
+	}
+	return gatheredAddress;
 }
 
 void Ext2FS::read_block(unsigned int block_address, unsigned char * buffer)
