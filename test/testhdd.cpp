@@ -3,6 +3,8 @@
 #include "hdd.h"
 #include "mbr.h"
 #include "pentry.h"
+#include <cstdlib>
+#include <cstring>
 #include "ext2fs.h"
 
 using namespace std;
@@ -31,7 +33,12 @@ int main(int argc, char ** argv)
 	struct Ext2FSInode * inode = fs->inode_for_path("/grupos/g5");
 	cout << *inode << endl;
 
-	//COMPLETAR
-	
+	unsigned char bufferTest[18];
+	//memset(bufferTest, '\0', 18);
+	fd_t file = fs->open("/grupos/g5/nota.txt", "r");
+	fs->seek(file, 13999);
+	fs->read(file, bufferTest, 17);
+	bufferTest[17] = '\0';
+	cout << bufferTest << endl;
 	return 0;
 }

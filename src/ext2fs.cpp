@@ -3,6 +3,7 @@
 #include "pentry.h"
 #include "mbr.h"
 #include <cassert>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 
@@ -280,60 +281,70 @@ unsigned int Ext2FS::blockaddr2sector(unsigned int block)
  */
 struct Ext2FSInode * Ext2FS::load_inode(unsigned int inode_number)
 {
-	//COMPLETAR
+	unsigned int block_size = 1024 << _superblock->log_block_size;
+
+	Ext2FSInode* result = (Ext2FSInode*) malloc(sizeof(Ext2FSInode));
+
+	unsigned int blockGroupIndex = blockgroup_for_inode(inode_number);
+	unsigned int inodeIndex = blockgroup_inode_index(inode_number);
+
+	Ext2FSBlockGroupDescriptor* blockGroup = block_group(blockGroupIndex);
+	
+	unsigned int inodes_per_block = block_size / _superblock->inode_size;
+	unsigned int targetBlock = inodeIndex / inodes_per_block;
+	unsigned int targetBlockOffset = inodeIndex % inodes_per_block;
+
+	unsigned char buffer[1024];
+
+	/*esto es el indice del primer bloque que contiene la inode table*/ 
+	unsigned int inodeBlockALeer = blockGroup->inode_table + targetBlock;
+	read_block(inodeBlockALeer, buffer);
+
+	memcpy(result, buffer + targetBlockOffset * (_superblock->inode_size), sizeof(Ext2FSInode));
+
+	return result;
 }
 
-/*
-Reading the contents of an inode
-
-	Each inode contains 12 direct pointers, one singly indirect pointer, one doubly indirect block pointer, and one triply indirect pointer. The direct space "overflows" into the singly indirect space, which overflows into the doubly indirect space, which overflows into the triply indirect space.
-
-	Direct Block Pointers: There are 12 direct block pointers. If valid, the value is non-zero. Each pointer is the block address of a block containing data for this inode.
-
-	Singly Indirect Block Pointer: If a file needs more than 12 blocks, a separate block is allocated to store the block addresses of the remaining data blocks needed to store its contents. This separate block is called an indirect block because it adds an extra step (a level of indirection) between an inode and its data. The block addresses stored in the block are all 32-bit, and the capacity of stored addresses in this block is a function of the block size. The address of this indirect block is stored in the inode in the "Singly Indirect Block Pointer" field.
-
-	Doubly Indirect Block Pointer: If a file has more blocks than can fit in the 12 direct pointers and the indirect block, a double indirect block is used. A double indirect block is an extension of the indirect block described above only now we have two intermediate blocks between the inode and data blocks. The inode structure has a "Doubly Indirect Block Pointer" field that points to this block if necessary.
-
-	Triply Indirect Block Pointer: Lastly, if a file needs still more space, it can use a triple indirect block. Again, this is an extension of the double indirect block. So, a triple indirect block contains addresses of double indirect blocks, which contain addresses of single indirect blocks, which contain address of data blocks. The inode structure has a "Triply Indirect Block Pointer" field that points to this block if present.
-
-	This image from Wikipedia illustrates what is described above pretty well
-
-*/
 unsigned int Ext2FS::get_block_address(struct Ext2FSInode * inode, unsigned int block_number)
 {
-	//Asumo que lo que se quiere es obtener la direccion del bloque i-esimo(block_number) adentro del inodo
-
-	//si block_number esta en [0..11] entonces son punteros directos
-	//Sea f(x) un valor que depende del tamaño x del bloque en el filesystem
-	//si block_number esta en [12..f(x)] entonces el hay que obtener el (block_number - 12) bloque indireccionando
-	//una vez mas.
-	//asi siguiendo en cascada sobre las dobles y triples indirecciones.
-
-	//validaciones
 	assert(block_number >= 0);
-
-
-
-									assert(block_number < 12);
-
-
 
 	//definicion de variables
 	unsigned int gatheredAddress = 0;
-	//dummy values
-	unsigned int first_indirection_limit = 256;
-	unsigned int second_indirection_limit = 1024;
-	unsigned int third_indirection_limit = 4096;
+	unsigned int block_size = 1024 << _superblock->log_block_size;
+
+	unsigned int addr_size = sizeof(unsigned int);
+	unsigned int direct_gathering_limit = 12;
+	unsigned int first_indirection_limit = (block_size / addr_size) + direct_gathering_limit;// 268
+	unsigned int second_indirection_limit = ((block_size / addr_size) * (block_size / addr_size)) + first_indirection_limit;
 
 	//decision acerca de como obtener la direccion del bloque.
-	if(block_number < 12){
-		gatheredAddress = inode->blocks[block_number];
+	if(block_number < direct_gathering_limit){
+		gatheredAddress = inode->block[block_number];
 	}else if(block_number < first_indirection_limit){
-		//obtener el bloque de punteros a mas bloques
+		unsigned char buffer[1024];
+		//obtengo el bloque de punteros a los bloques con datos al buffer
+		read_block((inode->block[12]), buffer);
+		//indexo 4*(block_number - 12) adentro del buffer y devuelvo esa direccion
+		unsigned int targetBlock = (block_number - direct_gathering_limit);
+		
+		gatheredAddress = *((unsigned int*) (buffer + addr_size * targetBlock));
+
 	}else if(block_number < second_indirection_limit){	
-		//obtener el bloque de punteros a mas bloques
-	}else if(block_number < third_indirection_limit){
-		//obtener el bloque de punteros a mas bloques
+		unsigned char buffer[1024];
+		//obtengo el bloque de ptr a bloques de punteros a datos al buffer
+		read_block((inode->block[13]), buffer);
+		//en buffer tengo 256 bloques con 256 ptr a los bloques de datos cada uno
+		//tengo que identificar en que bloque cae y calcular el offset dentro de dicho bloque
+		unsigned int blockNumber = (block_number - first_indirection_limit) / (block_size / addr_size);
+		unsigned int blockOffset = (block_number - first_indirection_limit) % (block_size / addr_size);
+
+		//leo el bloque del segundo nivel
+		read_block(buffer[(blockNumber * block_size)], buffer);
+
+		//obtengo la direccion con el offset
+		gatheredAddress = *((unsigned int*) (buffer + addr_size * blockOffset));
+
 	}
 	return gatheredAddress;
 }
@@ -352,7 +363,31 @@ struct Ext2FSInode * Ext2FS::get_file_inode_from_dir_inode(struct Ext2FSInode * 
 		from = load_inode(EXT2_RDIR_INODE_NUMBER);
 	assert(INODE_ISDIR(from));
 
-	//COMPLETAR
+	Ext2FSInode * target = NULL;
+
+	bool continuarBusqueda = true;
+	unsigned int currentBlockNumber = 0;
+	while(continuarBusqueda){
+		unsigned int blockAddress = get_block_address(from, currentBlockNumber);
+		unsigned char buffer[1024];
+		read_block(blockAddress, buffer);
+		//el buffer es la cabeza de una lista enlazada de longuitud variable
+		
+		bool hayaCosasEnLaLista = true;
+		unsigned int iterator = 0;
+		while(hayaCosasEnLaLista && continuarBusqueda){
+			Ext2FSDirEntry* dirEntry = ((Ext2FSDirEntry*) &buffer[iterator]);
+			if(strncmp(dirEntry->name, filename, dirEntry->name_length) == 0){
+				continuarBusqueda = false;
+				target = load_inode(dirEntry->inode);
+			}
+			iterator += dirEntry->record_length;
+			hayaCosasEnLaLista = (iterator < 1024) ;
+		}
+		currentBlockNumber++;		
+	}
+
+	return target;
 }
 
 fd_t Ext2FS::get_free_fd()
